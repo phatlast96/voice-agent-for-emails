@@ -1,6 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { useCredentialsStore } from '../store/credentials.store';
+
+export interface Attachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  is_inline?: boolean;
+  content_id?: string;
+}
 
 export interface Email {
   id: string;
@@ -11,6 +21,7 @@ export interface Email {
   snippet: string;
   body?: string;
   hasAttachments?: boolean;
+  attachments?: Attachment[];
 }
 
 interface EmailModalProps {
@@ -106,6 +117,9 @@ export function EmailModal({ isOpen, onClose, emails, isLoading = false }: Email
 }
 
 function EmailItem({ email }: { email: Email }) {
+  const credentialsStore = useCredentialsStore();
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
+
   const formatDate = (date: Date) => {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
@@ -119,6 +133,90 @@ function EmailItem({ email }: { email: Email }) {
       return `${days} days ago`;
     } else {
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const getFileIcon = (contentType: string) => {
+    if (contentType.startsWith('image/')) {
+      return (
+        <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      );
+    } else if (contentType.includes('pdf')) {
+      return (
+        <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+      );
+    } else {
+      return (
+        <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+        </svg>
+      );
+    }
+  };
+
+  const handleDownloadAttachment = async (attachment: Attachment) => {
+    const apiKey = credentialsStore.getNylasApiKey();
+    const grantId = credentialsStore.getNylasGrantId();
+
+    if (!apiKey.trim() || !grantId.trim()) {
+      alert('Please configure your Nylas API Key and Grant ID in settings first.');
+      return;
+    }
+
+    setDownloadingAttachmentId(attachment.id);
+
+    try {
+      const response = await fetch(`/api/emails/${email.id}/attachments/${attachment.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          apiKey,
+          grantId,
+          download: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download attachment');
+      }
+
+      // Get filename from Content-Disposition header or use attachment filename
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      let filename = attachment.filename;
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      if (filenameMatch) {
+        filename = filenameMatch[1];
+      }
+
+      // Create blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download attachment:', error);
+      alert('Failed to download attachment. Please try again.');
+    } finally {
+      setDownloadingAttachmentId(null);
     }
   };
 
@@ -160,6 +258,41 @@ function EmailItem({ email }: { email: Email }) {
           <p className="text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2">
             {email.snippet || email.body || 'No preview available'}
           </p>
+
+          {/* Attachments */}
+          {email.attachments && email.attachments.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {email.attachments.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  onClick={() => handleDownloadAttachment(attachment)}
+                  disabled={downloadingAttachmentId === attachment.id}
+                  className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                >
+                  {getFileIcon(attachment.content_type)}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                      {attachment.filename}
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {formatFileSize(attachment.size)}
+                      {attachment.is_inline && ' • Inline'}
+                    </p>
+                  </div>
+                  {downloadingAttachmentId === attachment.id ? (
+                    <svg className="h-4 w-4 animate-spin text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* To recipients */}
           {email.to.length > 0 && (

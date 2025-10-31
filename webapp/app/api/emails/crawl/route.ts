@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
     // Fetch messages from Nylas API v3
     // Documentation: https://developer.nylas.com/docs/v3/email/messages/
     // Note: The base URL might vary by region (api.us.nylas.com, api.eu.nylas.com, etc.)
+    // Attachments are included by default in the message response
     const url = new URL(`https://api.us.nylas.com/v3/grants/${grantId}/messages`);
     url.searchParams.append('limit', limit.toString());
     // Note: Nylas API v3 doesn't support order_by and order parameters
@@ -72,6 +73,16 @@ export async function POST(request: NextRequest) {
         date = new Date(); // Fallback to current date
       }
 
+      // Transform attachments from Nylas format
+      const attachments = (message.attachments || []).map((attachment: any) => ({
+        id: attachment.id,
+        filename: attachment.filename || 'unknown',
+        content_type: attachment.content_type || 'application/octet-stream',
+        size: attachment.size || 0,
+        is_inline: attachment.is_inline || false,
+        content_id: attachment.content_id,
+      }));
+
       return {
         id: message.id,
         subject: message.subject || '(No subject)',
@@ -86,7 +97,8 @@ export async function POST(request: NextRequest) {
         date: date,
         snippet: message.snippet || '',
         body: message.body || '',
-        hasAttachments: (message.files || []).length > 0,
+        hasAttachments: attachments.length > 0,
+        attachments: attachments,
       };
     });
 

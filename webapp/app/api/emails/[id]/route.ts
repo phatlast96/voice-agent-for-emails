@@ -23,6 +23,7 @@ export async function POST(
     }
 
     // Fetch message details from Nylas API
+    // Attachments are included by default in the message response
     const nylasApiUrl = `https://api.us.nylas.com/v3/grants/${grantId}/messages/${emailId}`;
     
     const response = await fetch(nylasApiUrl, {
@@ -44,6 +45,16 @@ export async function POST(
 
     const message = await response.json();
 
+    // Transform attachments from Nylas format
+    const attachments = (message.attachments || []).map((attachment: any) => ({
+      id: attachment.id,
+      filename: attachment.filename || 'unknown',
+      content_type: attachment.content_type || 'application/octet-stream',
+      size: attachment.size || 0,
+      is_inline: attachment.is_inline || false,
+      content_id: attachment.content_id,
+    }));
+
     // Transform Nylas message to our Email format
     const email = {
       id: message.id,
@@ -59,7 +70,8 @@ export async function POST(
       date: new Date(message.date * 1000), // Nylas uses Unix timestamp
       snippet: message.snippet || '',
       body: message.body || '',
-      hasAttachments: (message.files || []).length > 0,
+      hasAttachments: attachments.length > 0,
+      attachments: attachments,
     };
 
     return NextResponse.json({ email });

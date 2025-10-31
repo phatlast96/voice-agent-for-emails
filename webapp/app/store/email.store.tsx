@@ -4,6 +4,15 @@ import { makeAutoObservable } from 'mobx';
 import { createContext, useContext, ReactNode, useMemo } from 'react';
 import type { CredentialsStore } from './credentials.store';
 
+export interface Attachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  is_inline?: boolean;
+  content_id?: string;
+}
+
 export interface Email {
   id: string;
   subject: string;
@@ -13,6 +22,7 @@ export interface Email {
   snippet: string;
   body?: string;
   hasAttachments?: boolean;
+  attachments?: Attachment[];
 }
 
 type CrawlStatus = 'idle' | 'running' | 'completed' | 'error';
