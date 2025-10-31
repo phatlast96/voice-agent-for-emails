@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useCredentialsStore } from '../store/credentials.store';
 
 type RecordingState = 'idle' | 'recording' | 'processing' | 'responding';
 
@@ -9,105 +10,183 @@ export function VoiceQuery() {
   const [transcript, setTranscript] = useState('');
   const [response, setResponse] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const transcriptRef = useRef<string>('');
+  const [error, setError] = useState<string>('');
+  const credentialsStore = useCredentialsStore();
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const synthesisRef = useRef<SpeechSynthesis | null>(null);
 
   useEffect(() => {
-    transcriptRef.current = transcript;
-  }, [transcript]);
+    // Initialize speech synthesis
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      synthesisRef.current = window.speechSynthesis;
+    }
 
-  useEffect(() => {
     return () => {
-      // Cleanup recognition on unmount
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-        recognitionRef.current = null;
+      // Cleanup on unmount
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (synthesisRef.current) {
+        synthesisRef.current.cancel();
       }
     };
   }, []);
 
-  const processQuery = async () => {
+  const processQuery = async (audioBlob?: Blob, transcriptText?: string) => {
     setState('processing');
-    // TODO: Implement actual API call to process query
-    setTimeout(() => {
-      setResponse('I found 3 emails received today. The most recent is from John Doe regarding the project update.');
+    setError('');
+    setResponse('');
+
+    const openaiApiKey = credentialsStore.getOpenAIApiKey();
+    const grantId = credentialsStore.getNylasGrantId();
+
+    if (!openaiApiKey.trim() || !grantId.trim()) {
+      setError('Please configure your OpenAI API Key and Nylas Grant ID in settings first.');
+      setState('idle');
+      return;
+    }
+
+    try {
+      let audioBase64: string | undefined;
+      let audioFormat: string | undefined;
+
+      // Convert audio blob to base64 if provided
+      if (audioBlob) {
+        audioBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64String = (reader.result as string).split(',')[1]; // Remove data URL prefix
+            resolve(base64String);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(audioBlob);
+        });
+        // Determine format from blob type
+        audioFormat = audioBlob.type.includes('webm') ? 'webm' : 
+                     audioBlob.type.includes('mp4') ? 'mp4' : 
+                     audioBlob.type.includes('wav') ? 'wav' : 'webm';
+      }
+
+      // Call the voice query API
+      const response = await fetch('/api/voice-query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transcript: transcriptText,
+          audio: audioBase64,
+          audioFormat,
+          openaiApiKey,
+          grantId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process query');
+      }
+
+      const data = await response.json();
+      
+      setTranscript(data.transcript || transcriptText || '');
+      setResponse(data.response || 'No response received');
       setState('responding');
-    }, 1500);
+
+      // Speak the response using text-to-speech (faster rate)
+      if (data.response && synthesisRef.current) {
+        const utterance = new SpeechSynthesisUtterance(data.response);
+        utterance.rate = 1.4; // Increased from 1.0 to 1.4 for faster playback
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+        synthesisRef.current.speak(utterance);
+      }
+    } catch (error: any) {
+      console.error('Error processing query:', error);
+      setError(error.message || 'Failed to process your question. Please try again.');
+      setState('idle');
+    }
   };
 
   const startRecording = async () => {
     setState('recording');
     setTranscript('');
     setResponse('');
-    transcriptRef.current = '';
+    setError('');
+    audioChunksRef.current = [];
 
-    // TODO: Implement actual voice recording
-    // This is a placeholder for Web Speech API or similar
     try {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      if (!SpeechRecognition) {
-        throw new Error('Speech recognition not available');
-      }
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognitionRef.current = recognition;
+      // Create MediaRecorder
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4',
+      });
 
-      recognition.onresult = (event: any) => {
-        const finalTranscript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        setTranscript(finalTranscript);
-        transcriptRef.current = finalTranscript;
-      };
+      mediaRecorderRef.current = mediaRecorder;
 
-      recognition.onend = () => {
-        if (recognitionRef.current) {
-          recognitionRef.current = null;
-          setState('idle');
-          // Process query if we have transcript
-          if (transcriptRef.current) {
-            processQuery();
-          }
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
 
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        recognitionRef.current = null;
-        setState('idle');
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release microphone
+        stream.getTracks().forEach(track => track.stop());
+
+        // Create audio blob
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mediaRecorder.mimeType,
+        });
+
+        // Process the query with the recorded audio
+        await processQuery(audioBlob);
+
+        audioChunksRef.current = [];
       };
 
-      recognition.start();
-    } catch (error) {
-      console.error('Speech recognition not available:', error);
-      // Fallback: simulate recording
-      setTimeout(() => {
-        const simulatedTranscript = 'What emails did I receive today?';
-        setTranscript(simulatedTranscript);
-        transcriptRef.current = simulatedTranscript;
+      mediaRecorder.onerror = (event: any) => {
+        console.error('MediaRecorder error:', event.error);
+        setError('Recording error occurred. Please try again.');
         setState('idle');
-        processQuery();
-      }, 2000);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      // Start recording
+      mediaRecorder.start();
+    } catch (error: any) {
+      console.error('Error starting recording:', error);
+      setError(
+        error.name === 'NotAllowedError'
+          ? 'Microphone access denied. Please allow microphone access and try again.'
+          : error.name === 'NotFoundError'
+          ? 'No microphone found. Please connect a microphone and try again.'
+          : 'Failed to start recording. Please try again.'
+      );
+      setState('idle');
     }
   };
 
   const stopRecording = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
     }
-    setState('idle');
-    if (transcriptRef.current) {
-      processQuery();
-    }
+    // The onstop handler will process the query
   };
 
   const reset = () => {
+    // Stop any ongoing speech
+    if (synthesisRef.current) {
+      synthesisRef.current.cancel();
+    }
     setState('idle');
     setTranscript('');
     setResponse('');
+    setError('');
   };
 
   return (
@@ -181,6 +260,14 @@ export function VoiceQuery() {
                   {state === 'processing' && 'Processing your query...'}
                   {state === 'responding' && 'Response ready'}
                 </p>
+              </div>
+            )}
+
+            {/* Error Message */}
+            {error && (
+              <div className="rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
+                <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Error:</p>
+                <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
               </div>
             )}
 
