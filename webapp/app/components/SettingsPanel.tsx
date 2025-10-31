@@ -7,6 +7,7 @@ import { useCredentialsStore } from '../store/credentials.store';
 export const SettingsPanel = observer(function SettingsPanel() {
   const credentialsStore = useCredentialsStore();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showGrantIdHelp, setShowGrantIdHelp] = useState(false);
 
   const handleSave = async () => {
     await credentialsStore.saveCredentials();
@@ -44,9 +45,51 @@ export const SettingsPanel = observer(function SettingsPanel() {
           <div className="space-y-4">
             {credentialsStore.credentials.map((credential) => (
               <div key={credential.id} className="space-y-2">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  {credential.name}
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    {credential.name}
+                  </label>
+                  {credential.name === 'Nylas Grant ID' && (
+                    <button
+                      onClick={() => setShowGrantIdHelp(!showGrantIdHelp)}
+                      className="group relative flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 transition-colors hover:text-blue-600 dark:hover:text-blue-400"
+                      aria-label="Show help for Nylas Grant ID"
+                      aria-expanded={showGrantIdHelp}
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                
+                {credential.name === 'Nylas Grant ID' && showGrantIdHelp && (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs dark:border-blue-800/50 dark:bg-blue-900/10">
+                    <div className="mb-2 flex items-start gap-2">
+                      <svg className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div className="flex-1 space-y-1.5">
+                        <p className="font-medium text-blue-900 dark:text-blue-200">How to get your Grant ID:</p>
+                        <ol className="space-y-1 text-blue-800 dark:text-blue-300">
+                          <li className="flex gap-2">
+                            <span className="shrink-0 font-medium">1.</span>
+                            <span>Go to the Nylas Developer Dashboard</span>
+                          </li>
+                          <li className="flex gap-2">
+                            <span className="shrink-0 font-medium">2.</span>
+                            <span>Click on &quot;Grants&quot; under &quot;Manage&quot;</span>
+                          </li>
+                          <li className="flex gap-2">
+                            <span className="shrink-0 font-medium">3.</span>
+                            <span>Click on &quot;Create Grant&quot; with the email you want to use for the grant</span>
+                          </li>
+                        </ol>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <div className="flex gap-2">
                   <input
                     type={credential.masked ? 'password' : 'text'}
