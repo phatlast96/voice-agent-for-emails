@@ -10,11 +10,23 @@ export const CrawlPanel = observer(function CrawlPanel() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
+    // Fetch crawl jobs from database on mount/refresh
+    emailStore.fetchCrawlJobs();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     // Open modal automatically when crawl completes successfully
     if (emailStore.status === 'completed' && emailStore.emails.length > 0) {
       setIsModalOpen(true);
     }
   }, [emailStore.status, emailStore.emails.length]);
+
+  useEffect(() => {
+    // Refresh crawl jobs when crawl completes or errors
+    if (emailStore.status === 'completed' || emailStore.status === 'error') {
+      emailStore.fetchCrawlJobs();
+    }
+  }, [emailStore.status]);
 
   const startCrawl = async () => {
     await emailStore.startCrawl();
@@ -104,16 +116,75 @@ export const CrawlPanel = observer(function CrawlPanel() {
               </div>
             )}
 
-            {emailStore.lastCrawl && emailStore.status === 'completed' && (
+            {/* Show latest crawl job info */}
+            {emailStore.latestCrawlJob && (
               <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
-                <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">
-                  Last crawl: {emailStore.lastCrawl.toLocaleString()}
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    Latest Crawl
+                  </p>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    emailStore.latestCrawlJob.status === 'completed'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                      : emailStore.latestCrawlJob.status === 'error'
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  }`}>
+                    {emailStore.latestCrawlJob.status}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-1">
+                  Started: {emailStore.latestCrawlJob.startedAt.toLocaleString()}
                 </p>
-                {emailStore.emails.length > 0 && (
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Found {emailStore.emails.length} email{emailStore.emails.length !== 1 ? 's' : ''}
+                {emailStore.latestCrawlJob.completedAt && (
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-1">
+                    Completed: {emailStore.latestCrawlJob.completedAt.toLocaleString()}
                   </p>
                 )}
+                {emailStore.latestCrawlJob.emailsCrawled > 0 && (
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                    Crawled {emailStore.latestCrawlJob.emailsCrawled} email{emailStore.latestCrawlJob.emailsCrawled !== 1 ? 's' : ''}
+                  </p>
+                )}
+                {emailStore.latestCrawlJob.errorMessage && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    Error: {emailStore.latestCrawlJob.errorMessage}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Show crawl history if available */}
+            {emailStore.crawlJobs.length > 1 && (
+              <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
+                <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                  Crawl History ({emailStore.crawlJobs.length} total)
+                </p>
+                <div className="space-y-2 max-h-32 overflow-y-auto">
+                  {emailStore.crawlJobs.slice(1, 4).map((job) => (
+                    <div key={job.id} className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-600 dark:text-zinc-400">
+                        {job.startedAt.toLocaleDateString()} {job.startedAt.toLocaleTimeString()}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                          job.status === 'completed'
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                            : job.status === 'error'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                        }`}>
+                          {job.status}
+                        </span>
+                        {job.emailsCrawled > 0 && (
+                          <span className="text-zinc-500 dark:text-zinc-400">
+                            {job.emailsCrawled}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

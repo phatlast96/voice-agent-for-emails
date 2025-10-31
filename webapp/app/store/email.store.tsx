@@ -26,6 +26,17 @@ export interface Email {
   attachments?: Attachment[];
 }
 
+export interface CrawlJob {
+  id: string;
+  grantId: string;
+  status: 'running' | 'completed' | 'error';
+  emailsCrawled: number;
+  startedAt: Date;
+  completedAt: Date | null;
+  errorMessage: string | null;
+  createdAt: Date;
+}
+
 type CrawlStatus = 'idle' | 'running' | 'completed' | 'error';
 
 class EmailStore {
@@ -34,6 +45,7 @@ class EmailStore {
   progress = 0;
   lastCrawl: Date | null = null;
   error: string | null = null;
+  crawlJobs: CrawlJob[] = []; // Crawl jobs from database
 
   constructor(private credentialsStore: CredentialsStore) {
     makeAutoObservable(this);
@@ -193,6 +205,53 @@ class EmailStore {
       this.error = error instanceof Error ? error.message : 'Unknown error occurred';
       console.error('Failed to fetch emails from Supabase:', error);
     }
+  }
+
+  /**
+   * Fetch crawl jobs from Supabase database
+   * This does not affect the local crawl status
+   */
+  async fetchCrawlJobs(): Promise<void> {
+    const grantId = this.credentialsStore.getNylasGrantId();
+
+    if (!grantId.trim()) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/emails/crawl-jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ grantId }),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to fetch crawl jobs');
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.crawlJobs) {
+        this.crawlJobs = data.crawlJobs.map((job: any) => ({
+          ...job,
+          startedAt: new Date(job.startedAt),
+          completedAt: job.completedAt ? new Date(job.completedAt) : null,
+          createdAt: new Date(job.createdAt),
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to fetch crawl jobs:', error);
+    }
+  }
+
+  /**
+   * Get the latest crawl job (most recent)
+   */
+  get latestCrawlJob(): CrawlJob | null {
+    return this.crawlJobs.length > 0 ? this.crawlJobs[0] : null;
   }
 }
 
