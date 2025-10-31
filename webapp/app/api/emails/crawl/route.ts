@@ -10,6 +10,33 @@ interface CrawlRequest {
   limit?: number;
 }
 
+interface NylasAttachment {
+  id: string;
+  filename?: string;
+  content_type?: string;
+  size?: number;
+  is_inline?: boolean;
+  content_id?: string;
+}
+
+interface NylasRecipient {
+  name?: string;
+  email: string;
+}
+
+interface NylasMessage {
+  id: string;
+  subject?: string;
+  from?: NylasRecipient[];
+  to?: NylasRecipient[];
+  cc?: NylasRecipient[];
+  bcc?: NylasRecipient[];
+  snippet?: string;
+  body?: string;
+  date?: number | string;
+  attachments?: NylasAttachment[];
+}
+
 export async function POST(request: NextRequest) {
   const supabase = createSupabaseClient();
   let crawlJobId: string | null = null;
@@ -95,221 +122,273 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json();
-    const messages = data.data || [];
+    const messages: NylasMessage[] = data.data || [];
 
-    // Transform and save emails to Supabase
-    const emails = [];
-    let savedCount = 0;
-
-    for (const message of messages) {
-      try {
-        // Handle date
-        let date: Date;
-        if (typeof message.date === 'number') {
-          date = new Date(message.date * 1000);
-        } else if (typeof message.date === 'string') {
-          date = new Date(message.date);
-        } else {
-          date = new Date();
-        }
-
-        // Prepare email data
-        const emailData = {
-          id: message.id,
-          grant_id: grantId,
-          subject: message.subject || '(No subject)',
-          from_name: message.from?.[0]?.name || message.from?.[0]?.email || 'Unknown',
-          from_email: message.from?.[0]?.email || 'unknown@example.com',
-          snippet: message.snippet || '',
-          body: message.body || null,
-          date: date.toISOString(),
-        };
-
-        // Upsert email (handle duplicates)
-        const { error: emailError } = await supabase
-          .from('emails')
-          .upsert(emailData, { onConflict: 'id' });
-
-        if (emailError) {
-          console.error(`Error saving email ${message.id}:`, emailError);
-          continue;
-        }
-
-        // Save recipients
-        const recipients = [];
+    // Utility function to process items in parallel with concurrency limit
+    async function processInParallel<T, R>(
+      items: T[],
+      processor: (item: T) => Promise<R>,
+      concurrency: number = 10
+    ): Promise<R[]> {
+      const results: R[] = [];
+      
+      for (let i = 0; i < items.length; i += concurrency) {
+        const batch = items.slice(i, i + concurrency);
+        const batchResults = await Promise.allSettled(
+          batch.map(processor)
+        );
         
-        // Handle 'to' recipients
-        if (message.to && Array.isArray(message.to)) {
-          for (const recipient of message.to) {
-            recipients.push({
-              email_id: message.id,
-              type: 'to',
-              name: recipient.name || null,
-              email: recipient.email || 'unknown@example.com',
-            });
+        for (const result of batchResults) {
+          if (result.status === 'fulfilled') {
+            results.push(result.value);
           }
         }
-
-        // Handle 'cc' recipients
-        if (message.cc && Array.isArray(message.cc)) {
-          for (const recipient of message.cc) {
-            recipients.push({
-              email_id: message.id,
-              type: 'cc',
-              name: recipient.name || null,
-              email: recipient.email || 'unknown@example.com',
-            });
-          }
-        }
-
-        // Handle 'bcc' recipients
-        if (message.bcc && Array.isArray(message.bcc)) {
-          for (const recipient of message.bcc) {
-            recipients.push({
-              email_id: message.id,
-              type: 'bcc',
-              name: recipient.name || null,
-              email: recipient.email || 'unknown@example.com',
-            });
-          }
-        }
-
-        // Delete existing recipients and insert new ones
-        if (recipients.length > 0) {
-          await supabase.from('email_recipients').delete().eq('email_id', message.id);
-          const { error: recipientsError } = await supabase
-            .from('email_recipients')
-            .insert(recipients);
-
-          if (recipientsError) {
-            console.error(`Error saving recipients for email ${message.id}:`, recipientsError);
-          }
-        }
-
-        // Process attachments
-        const attachments = message.attachments || [];
-        const savedAttachments = [];
-
-        for (const attachment of attachments) {
-          try {
-            // Download attachment from Nylas
-            const attachmentUrl = `https://api.us.nylas.com/v3/grants/${grantId}/attachments/${attachment.id}/download?message_id=${message.id}`;
-            const attachmentResponse = await fetch(attachmentUrl, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${apiKey}`,
-              },
-            });
-
-            if (!attachmentResponse.ok) {
-              console.error(`Failed to download attachment ${attachment.id}`);
-              continue;
-            }
-
-            const attachmentBuffer = await attachmentResponse.arrayBuffer();
-            const filename = attachment.filename || 'unknown';
-            const storagePath = `${grantId}/${message.id}/${attachment.id}/${filename}`;
-
-            // Upload to Supabase storage
-            const { error: uploadError } = await supabase.storage
-              .from('email-attachments')
-              .upload(storagePath, attachmentBuffer, {
-                contentType: attachment.content_type || 'application/octet-stream',
-                upsert: true,
-              });
-
-            if (uploadError) {
-              console.error(`Error uploading attachment ${attachment.id}:`, uploadError);
-              continue;
-            }
-
-            // Save attachment metadata
-            const attachmentData = {
-              id: attachment.id,
-              email_id: message.id,
-              filename: filename,
-              content_type: attachment.content_type || 'application/octet-stream',
-              size: attachment.size || 0,
-              is_inline: attachment.is_inline || false,
-              content_id: attachment.content_id || null,
-              storage_path: storagePath,
-            };
-
-            const { error: attachmentError } = await supabase
-              .from('attachments')
-              .upsert(attachmentData, { onConflict: 'id' });
-
-            if (attachmentError) {
-              console.error(`Error saving attachment metadata ${attachment.id}:`, attachmentError);
-              continue;
-            }
-
-            savedAttachments.push({
-              id: attachment.id,
-              filename: filename,
-              content_type: attachment.content_type || 'application/octet-stream',
-              size: attachment.size || 0,
-              is_inline: attachment.is_inline || false,
-              content_id: attachment.content_id,
-            });
-
-            // Extract text and generate embeddings for attachment (async, don't wait)
-            if (openaiApiKey) {
-              extractTextFromAttachment(
-                attachmentBuffer,
-                attachment.content_type || 'application/octet-stream',
-                filename
-              )
-                .then((extracted) => {
-                  if (extracted.success && extracted.text) {
-                    generateAttachmentEmbeddings(attachment.id, extracted.text, openaiApiKey).catch((err) => {
-                      console.error(`Error generating embeddings for attachment ${attachment.id}:`, err);
-                    });
-                  }
-                })
-                .catch((err) => {
-                  console.error(`Error extracting text from attachment ${attachment.id}:`, err);
-                });
-            }
-
-          } catch (attachmentError) {
-            console.error(`Error processing attachment ${attachment.id}:`, attachmentError);
-          }
-        }
-
-        // Transform for response
-        emails.push({
-          id: message.id,
-          subject: emailData.subject,
-          from: {
-            name: emailData.from_name,
-            email: emailData.from_email,
-          },
-          to: recipients
-            .filter((r) => r.type === 'to')
-            .map((r) => ({ name: r.name || 'Unknown', email: r.email })),
-          date: date,
-          snippet: emailData.snippet,
-          body: emailData.body || '',
-          hasAttachments: savedAttachments.length > 0,
-          hasEmbeddings: false, // Will be true once embeddings are generated
-          attachments: savedAttachments,
-        });
-
-        // Generate embeddings for email content (async, don't wait)
-        if (openaiApiKey) {
-          generateEmailEmbeddings(message.id, emailData.subject, emailData.body || '', openaiApiKey).catch(
-            (err) => {
-              console.error(`Error generating embeddings for email ${message.id}:`, err);
-            }
-          );
-        }
-
-        savedCount++;
-      } catch (emailError) {
-        console.error(`Error processing email ${message.id}:`, emailError);
       }
+      
+      return results;
     }
+
+    // Process all emails in parallel batches
+    const embeddingPromises: Promise<void>[] = [];
+
+    // Process each email
+    const emailResults = await processInParallel(
+      messages,
+      async (message: NylasMessage) => {
+        try {
+          // Handle date
+          let date: Date;
+          if (typeof message.date === 'number') {
+            date = new Date(message.date * 1000);
+          } else if (typeof message.date === 'string') {
+            date = new Date(message.date);
+          } else {
+            date = new Date();
+          }
+
+          // Prepare email data
+          const emailData = {
+            id: message.id,
+            grant_id: grantId,
+            subject: message.subject || '(No subject)',
+            from_name: message.from?.[0]?.name || message.from?.[0]?.email || 'Unknown',
+            from_email: message.from?.[0]?.email || 'unknown@example.com',
+            snippet: message.snippet || '',
+            body: message.body || null,
+            date: date.toISOString(),
+          };
+
+          // Upsert email (handle duplicates)
+          const { error: emailError } = await supabase
+            .from('emails')
+            .upsert(emailData, { onConflict: 'id' });
+
+          if (emailError) {
+            console.error(`Error saving email ${message.id}:`, emailError);
+            return null;
+          }
+
+          // Save recipients
+          const recipients = [];
+          
+          // Handle 'to' recipients
+          if (message.to && Array.isArray(message.to)) {
+            for (const recipient of message.to) {
+              recipients.push({
+                email_id: message.id,
+                type: 'to',
+                name: recipient.name || null,
+                email: recipient.email || 'unknown@example.com',
+              });
+            }
+          }
+
+          // Handle 'cc' recipients
+          if (message.cc && Array.isArray(message.cc)) {
+            for (const recipient of message.cc) {
+              recipients.push({
+                email_id: message.id,
+                type: 'cc',
+                name: recipient.name || null,
+                email: recipient.email || 'unknown@example.com',
+              });
+            }
+          }
+
+          // Handle 'bcc' recipients
+          if (message.bcc && Array.isArray(message.bcc)) {
+            for (const recipient of message.bcc) {
+              recipients.push({
+                email_id: message.id,
+                type: 'bcc',
+                name: recipient.name || null,
+                email: recipient.email || 'unknown@example.com',
+              });
+            }
+          }
+
+          // Delete existing recipients and insert new ones
+          if (recipients.length > 0) {
+            await supabase.from('email_recipients').delete().eq('email_id', message.id);
+            const { error: recipientsError } = await supabase
+              .from('email_recipients')
+              .insert(recipients);
+
+            if (recipientsError) {
+              console.error(`Error saving recipients for email ${message.id}:`, recipientsError);
+            }
+          }
+
+          // Process attachments in parallel
+          const attachments = message.attachments || [];
+          const savedAttachments = await processInParallel(
+            attachments,
+            async (attachment: NylasAttachment) => {
+              try {
+                // Download attachment from Nylas
+                const attachmentUrl = `https://api.us.nylas.com/v3/grants/${grantId}/attachments/${attachment.id}/download?message_id=${message.id}`;
+                const attachmentResponse = await fetch(attachmentUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                  },
+                });
+
+                if (!attachmentResponse.ok) {
+                  console.error(`Failed to download attachment ${attachment.id}`);
+                  return null;
+                }
+
+                const attachmentBuffer = await attachmentResponse.arrayBuffer();
+                const filename = attachment.filename || 'unknown';
+                const storagePath = `${grantId}/${message.id}/${attachment.id}/${filename}`;
+
+                // Upload to Supabase storage
+                const { error: uploadError } = await supabase.storage
+                  .from('email-attachments')
+                  .upload(storagePath, attachmentBuffer, {
+                    contentType: attachment.content_type || 'application/octet-stream',
+                    upsert: true,
+                  });
+
+                if (uploadError) {
+                  console.error(`Error uploading attachment ${attachment.id}:`, uploadError);
+                  return null;
+                }
+
+                // Save attachment metadata
+                const attachmentData = {
+                  id: attachment.id,
+                  email_id: message.id,
+                  filename: filename,
+                  content_type: attachment.content_type || 'application/octet-stream',
+                  size: attachment.size || 0,
+                  is_inline: attachment.is_inline || false,
+                  content_id: attachment.content_id || null,
+                  storage_path: storagePath,
+                };
+
+                const { error: attachmentError } = await supabase
+                  .from('attachments')
+                  .upsert(attachmentData, { onConflict: 'id' });
+
+                if (attachmentError) {
+                  console.error(`Error saving attachment metadata ${attachment.id}:`, attachmentError);
+                  return null;
+                }
+
+                const savedAttachment = {
+                  id: attachment.id,
+                  filename: filename,
+                  content_type: attachment.content_type || 'application/octet-stream',
+                  size: attachment.size || 0,
+                  is_inline: attachment.is_inline || false,
+                  content_id: attachment.content_id,
+                };
+
+                // Extract text and generate embeddings for attachment (async)
+                if (openaiApiKey) {
+                  const embeddingPromise = extractTextFromAttachment(
+                    attachmentBuffer,
+                    attachment.content_type || 'application/octet-stream',
+                    filename
+                  )
+                    .then((extracted) => {
+                      if (extracted.success && extracted.text) {
+                        return generateAttachmentEmbeddings(attachment.id, extracted.text, openaiApiKey);
+                      }
+                    })
+                    .catch((err) => {
+                      console.error(`Error processing embeddings for attachment ${attachment.id}:`, err);
+                    });
+                  
+                  embeddingPromises.push(embeddingPromise);
+                }
+
+                return savedAttachment;
+              } catch (attachmentError) {
+                console.error(`Error processing attachment ${attachment.id}:`, attachmentError);
+                return null;
+              }
+            },
+            5 // Process 5 attachments in parallel per email
+          );
+
+          const validAttachments = savedAttachments.filter((a): a is NonNullable<typeof a> => a !== null);
+
+          // Transform for response
+          const emailResponse = {
+            id: message.id,
+            subject: emailData.subject,
+            from: {
+              name: emailData.from_name,
+              email: emailData.from_email,
+            },
+            to: recipients
+              .filter((r) => r.type === 'to')
+              .map((r) => ({ name: r.name || 'Unknown', email: r.email })),
+            date: date,
+            snippet: emailData.snippet,
+            body: emailData.body || '',
+            hasAttachments: validAttachments.length > 0,
+            hasEmbeddings: false, // Will be true once embeddings are generated
+            attachments: validAttachments,
+          };
+
+          // Generate embeddings for email content (async)
+          if (openaiApiKey) {
+            const emailEmbeddingPromise = generateEmailEmbeddings(
+              message.id,
+              emailData.subject,
+              emailData.body || '',
+              openaiApiKey
+            ).catch((err) => {
+              console.error(`Error generating embeddings for email ${message.id}:`, err);
+            });
+            
+            embeddingPromises.push(emailEmbeddingPromise);
+          }
+
+          return emailResponse;
+        } catch (emailError) {
+          console.error(`Error processing email ${message.id}:`, emailError);
+          return null;
+        }
+      },
+      10 // Process 10 emails in parallel
+    );
+
+    // Filter out null results and get valid emails
+    const emails = emailResults.filter((e): e is NonNullable<typeof e> => e !== null);
+    const savedCount = emails.length;
+
+    // Wait for all embeddings to complete (but don't block the response)
+    // This ensures embeddings are generated even if the response is sent early
+    Promise.allSettled(embeddingPromises).then((results) => {
+      const successful = results.filter((r) => r.status === 'fulfilled').length;
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      console.log(`Embedding generation completed: ${successful} successful, ${failed} failed`);
+    });
 
     // Sort emails by date (newest first)
     emails.sort((a: any, b: any) => b.date.getTime() - a.date.getTime());
