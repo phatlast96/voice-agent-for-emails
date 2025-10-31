@@ -12,7 +12,6 @@ export interface Credential {
 
 const DEFAULT_CREDENTIALS: Credential[] = [
   { id: '1', name: 'OpenAI API Key', value: '', masked: true },
-  { id: '2', name: 'Email API Key', value: '', masked: true },
   { id: '3', name: 'Nylas API Key', value: '', masked: true },
   { id: '4', name: 'Nylas Grant ID', value: '', masked: false },
 ];
