@@ -4,6 +4,7 @@ import { generateQueryEmbedding } from '@/lib/services/embeddings';
 
 interface SearchRequest {
   query: string;
+  openaiApiKey: string;
   grantId?: string;
   limit?: number;
   dateFrom?: string;
@@ -14,7 +15,7 @@ interface SearchRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: SearchRequest = await request.json();
-    const { query, grantId, limit = 10, dateFrom, dateTo, senderEmail } = body;
+    const { query, openaiApiKey, grantId, limit = 10, dateFrom, dateTo, senderEmail } = body;
 
     if (!query || query.trim().length === 0) {
       return NextResponse.json(
@@ -23,10 +24,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!openaiApiKey || openaiApiKey.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'OpenAI API Key is required' },
+        { status: 400 }
+      );
+    }
+
     const supabase = createSupabaseClient();
 
     // Generate embedding for the query
-    const queryEmbedding = await generateQueryEmbedding(query);
+    const queryEmbedding = await generateQueryEmbedding(query, openaiApiKey);
 
     // Perform vector similarity search for email embeddings
     const { data: emailMatches, error: emailError } = await supabase

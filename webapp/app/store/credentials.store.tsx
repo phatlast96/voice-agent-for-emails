@@ -104,6 +104,10 @@ class CredentialsStore {
     return this.getCredentialByName('Nylas Grant ID')?.value || '';
   }
 
+  getOpenAIApiKey(): string {
+    return this.getCredentialByName('OpenAI API Key')?.value || '';
+  }
+
   hasAllCredentials(): boolean {
     return this.credentials.every(cred => cred.value.trim().length > 0);
   }

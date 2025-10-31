@@ -41,6 +41,7 @@ class EmailStore {
   async startCrawl() {
     const apiKey = this.credentialsStore.getNylasApiKey();
     const grantId = this.credentialsStore.getNylasGrantId();
+    const openaiApiKey = this.credentialsStore.getOpenAIApiKey();
 
     if (!apiKey.trim()) {
       this.status = 'error';
@@ -71,7 +72,7 @@ class EmailStore {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ apiKey, grantId }),
+        body: JSON.stringify({ apiKey, grantId, openaiApiKey }),
       });
 
       clearInterval(progressInterval);

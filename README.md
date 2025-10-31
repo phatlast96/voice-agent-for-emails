@@ -16,6 +16,10 @@ This project requires both Supabase and Next.js to be running simultaneously.
    supabase start
    ```
 
+3. Run the migrations:
+   ```bash
+   supabase migration up
+   ```
 ### Starting Next.js
 
 1. Navigate to the `webapp` folder:

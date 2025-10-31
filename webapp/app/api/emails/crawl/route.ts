@@ -6,6 +6,7 @@ import { extractTextFromAttachment } from '@/lib/services/attachment-extractor';
 interface CrawlRequest {
   apiKey: string;
   grantId: string;
+  openaiApiKey?: string;
   limit?: number;
 }
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: CrawlRequest = await request.json();
-    const { apiKey, grantId, limit = 50 } = body;
+    const { apiKey, grantId, openaiApiKey, limit = 50 } = body;
 
     if (!apiKey || !grantId) {
       return NextResponse.json(
@@ -253,21 +254,23 @@ export async function POST(request: NextRequest) {
             });
 
             // Extract text and generate embeddings for attachment (async, don't wait)
-            extractTextFromAttachment(
-              attachmentBuffer,
-              attachment.content_type || 'application/octet-stream',
-              filename
-            )
-              .then((extracted) => {
-                if (extracted.success && extracted.text) {
-                  generateAttachmentEmbeddings(attachment.id, extracted.text).catch((err) => {
-                    console.error(`Error generating embeddings for attachment ${attachment.id}:`, err);
-                  });
-                }
-              })
-              .catch((err) => {
-                console.error(`Error extracting text from attachment ${attachment.id}:`, err);
-              });
+            if (openaiApiKey) {
+              extractTextFromAttachment(
+                attachmentBuffer,
+                attachment.content_type || 'application/octet-stream',
+                filename
+              )
+                .then((extracted) => {
+                  if (extracted.success && extracted.text) {
+                    generateAttachmentEmbeddings(attachment.id, extracted.text, openaiApiKey).catch((err) => {
+                      console.error(`Error generating embeddings for attachment ${attachment.id}:`, err);
+                    });
+                  }
+                })
+                .catch((err) => {
+                  console.error(`Error extracting text from attachment ${attachment.id}:`, err);
+                });
+            }
 
           } catch (attachmentError) {
             console.error(`Error processing attachment ${attachment.id}:`, attachmentError);
@@ -293,11 +296,13 @@ export async function POST(request: NextRequest) {
         });
 
         // Generate embeddings for email content (async, don't wait)
-        generateEmailEmbeddings(message.id, emailData.subject, emailData.body || '').catch(
-          (err) => {
-            console.error(`Error generating embeddings for email ${message.id}:`, err);
-          }
-        );
+        if (openaiApiKey) {
+          generateEmailEmbeddings(message.id, emailData.subject, emailData.body || '', openaiApiKey).catch(
+            (err) => {
+              console.error(`Error generating embeddings for email ${message.id}:`, err);
+            }
+          );
+        }
 
         savedCount++;
       } catch (emailError) {

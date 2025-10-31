@@ -2,21 +2,28 @@ import OpenAI from 'openai';
 import { createSupabaseClient } from '../supabase';
 import { chunkText } from './attachment-extractor';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
-});
+/**
+ * Create OpenAI client instance with API key
+ */
+function createOpenAIClient(apiKey: string): OpenAI {
+  if (!apiKey || apiKey.trim().length === 0) {
+    throw new Error('OpenAI API key is required');
+  }
+  return new OpenAI({ apiKey });
+}
 
 /**
  * Generate embeddings for email content and save to database
  * @param emailId - Email ID
  * @param subject - Email subject
  * @param body - Email body text
+ * @param openaiApiKey - OpenAI API key
  */
 export async function generateEmailEmbeddings(
   emailId: string,
   subject: string,
-  body: string = ''
+  body: string = '',
+  openaiApiKey: string
 ): Promise<void> {
   const supabase = createSupabaseClient();
   
@@ -44,6 +51,8 @@ export async function generateEmailEmbeddings(
   const chunks = chunkText(fullText, 8000, 200);
 
   try {
+    const openai = createOpenAIClient(openaiApiKey);
+    
     // Generate embeddings for all chunks in parallel
     const embeddingPromises = chunks.map(async (chunk, index) => {
       const response = await openai.embeddings.create({
@@ -80,10 +89,12 @@ export async function generateEmailEmbeddings(
  * Generate embeddings for attachment content and save to database
  * @param attachmentId - Attachment ID
  * @param text - Extracted text from attachment
+ * @param openaiApiKey - OpenAI API key
  */
 export async function generateAttachmentEmbeddings(
   attachmentId: string,
-  text: string
+  text: string,
+  openaiApiKey: string
 ): Promise<void> {
   const supabase = createSupabaseClient();
 
@@ -108,6 +119,8 @@ export async function generateAttachmentEmbeddings(
   const chunks = chunkText(text, 8000, 200);
 
   try {
+    const openai = createOpenAIClient(openaiApiKey);
+    
     // Generate embeddings for all chunks in parallel
     const embeddingPromises = chunks.map(async (chunk, index) => {
       const response = await openai.embeddings.create({
@@ -143,10 +156,12 @@ export async function generateAttachmentEmbeddings(
 /**
  * Generate embedding for a query string (for semantic search)
  * @param query - Query text
+ * @param openaiApiKey - OpenAI API key
  * @returns Embedding vector
  */
-export async function generateQueryEmbedding(query: string): Promise<number[]> {
+export async function generateQueryEmbedding(query: string, openaiApiKey: string): Promise<number[]> {
   try {
+    const openai = createOpenAIClient(openaiApiKey);
     const response = await openai.embeddings.create({
       model: 'text-embedding-3-small',
       input: query,
