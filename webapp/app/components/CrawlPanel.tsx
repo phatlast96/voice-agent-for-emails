@@ -1,37 +1,133 @@
 'use client';
 
 import { useState } from 'react';
+import { observer } from 'mobx-react-lite';
+import { useCredentialsStore } from '../store/credentials.store';
+import { EmailModal, Email } from './EmailModal';
 
 type CrawlStatus = 'idle' | 'running' | 'completed' | 'error';
 
-export function CrawlPanel() {
+export const CrawlPanel = observer(function CrawlPanel() {
+  const credentialsStore = useCredentialsStore();
   const [status, setStatus] = useState<CrawlStatus>('idle');
   const [progress, setProgress] = useState(0);
   const [lastCrawl, setLastCrawl] = useState<Date | null>(null);
+  const [emails, setEmails] = useState<Email[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLoadingEmails, setIsLoadingEmails] = useState(false);
+
+  const fetchEmailsFromNylas = async (apiKey: string): Promise<Email[]> => {
+    // TODO: Replace with actual Nylas API call
+    // For now, this is a mock implementation
+    try {
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Mock email data
+      const mockEmails: Email[] = [
+        {
+          id: '1',
+          subject: 'Project Update - Q4 Review',
+          from: { name: 'Sarah Johnson', email: 'sarah.johnson@company.com' },
+          to: [{ name: 'You', email: 'you@example.com' }],
+          date: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
+          snippet: 'Hi! I wanted to share an update on the Q4 project review. We\'ve made significant progress...',
+          hasAttachments: true,
+        },
+        {
+          id: '2',
+          subject: 'Meeting Invitation: Team Standup',
+          from: { name: 'Mike Chen', email: 'mike.chen@company.com' },
+          to: [{ name: 'You', email: 'you@example.com' }],
+          date: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
+          snippet: 'Please join us for our weekly team standup meeting scheduled for tomorrow at 10 AM.',
+        },
+        {
+          id: '3',
+          subject: 'Re: Budget Approval Request',
+          from: { name: 'Emma Wilson', email: 'emma.wilson@company.com' },
+          to: [{ name: 'You', email: 'you@example.com' }],
+          date: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
+          snippet: 'Thank you for your budget request. I\'ve reviewed it and have a few questions...',
+          hasAttachments: false,
+        },
+        {
+          id: '4',
+          subject: 'Welcome to the New Team!',
+          from: { name: 'David Lee', email: 'david.lee@company.com' },
+          to: [{ name: 'You', email: 'you@example.com' }],
+          date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
+          snippet: 'Welcome aboard! We\'re excited to have you join our team. Here\'s what you need to know...',
+        },
+        {
+          id: '5',
+          subject: 'Reminder: Deadline Approaching',
+          from: { name: 'Lisa Anderson', email: 'lisa.anderson@company.com' },
+          to: [{ name: 'You', email: 'you@example.com' }],
+          date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
+          snippet: 'Just a friendly reminder that the deadline for the quarterly report is approaching...',
+          hasAttachments: true,
+        },
+      ];
+
+      return mockEmails;
+    } catch (error) {
+      console.error('Failed to fetch emails from Nylas:', error);
+      throw error;
+    }
+  };
 
   const startCrawl = async () => {
+    const nylasApiKey = credentialsStore.getNylasApiKey();
+    
+    if (!nylasApiKey.trim()) {
+      setStatus('error');
+      alert('Please configure your Nylas API Key in settings first.');
+      return;
+    }
+
     setStatus('running');
     setProgress(0);
+    setIsLoadingEmails(true);
 
-    // Simulate crawl progress
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setStatus('completed');
-          setLastCrawl(new Date());
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 500);
+    try {
+      // Simulate progress updates
+      const progressInterval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 300);
 
-    // TODO: Implement actual crawl API call
+      // Fetch emails from Nylas
+      const fetchedEmails = await fetchEmailsFromNylas(nylasApiKey);
+
+      clearInterval(progressInterval);
+      setProgress(100);
+      setEmails(fetchedEmails);
+      setStatus('completed');
+      setLastCrawl(new Date());
+      setIsLoadingEmails(false);
+      
+      // Open modal automatically after crawl completes
+      setTimeout(() => {
+        setIsModalOpen(true);
+      }, 500);
+    } catch (error) {
+      setStatus('error');
+      setIsLoadingEmails(false);
+      setProgress(0);
+      console.error('Crawl failed:', error);
+    }
   };
 
   const stopCrawl = () => {
     setStatus('idle');
     setProgress(0);
+    setIsLoadingEmails(false);
   };
 
   const getStatusColor = () => {
@@ -60,73 +156,103 @@ export function CrawlPanel() {
     }
   };
 
+  const showEmails = () => {
+    if (emails.length > 0) {
+      setIsModalOpen(true);
+    }
+  };
+
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="p-4">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
-            <svg className="h-5 w-5 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-            </svg>
-          </div>
-          <div className="flex-1">
-            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Email Crawl</h3>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Index your emails and attachments</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Status</span>
-            <div className="flex items-center gap-2">
-              <div className={`h-2 w-2 rounded-full ${getStatusColor()}`} />
-              <span className="font-medium text-zinc-900 dark:text-zinc-100">{getStatusText()}</span>
+    <>
+      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="p-4">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
+              <svg className="h-5 w-5 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Email Crawl</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Index your emails and attachments</p>
             </div>
           </div>
 
-          {status === 'running' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">Progress</span>
-                <span className="font-medium text-zinc-900 dark:text-zinc-100">{progress}%</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div
-                  className={`h-full ${getStatusColor()} transition-all duration-300`}
-                  style={{ width: `${progress}%` }}
-                />
+          <div className="space-y-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-zinc-600 dark:text-zinc-400">Status</span>
+              <div className="flex items-center gap-2">
+                <div className={`h-2 w-2 rounded-full ${getStatusColor()}`} />
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">{getStatusText()}</span>
               </div>
             </div>
-          )}
 
-          {lastCrawl && status === 'completed' && (
-            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Last crawl: {lastCrawl.toLocaleString()}
-              </p>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            {status === 'idle' || status === 'completed' || status === 'error' ? (
-              <button
-                onClick={startCrawl}
-                className="flex-1 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 dark:bg-purple-500 dark:hover:bg-purple-600"
-              >
-                Start Crawl
-              </button>
-            ) : (
-              <button
-                onClick={stopCrawl}
-                className="flex-1 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:border-red-700 dark:bg-zinc-800 dark:text-red-400 dark:hover:bg-zinc-700"
-              >
-                Stop Crawl
-              </button>
+            {status === 'running' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-600 dark:text-zinc-400">Progress</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{progress}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div
+                    className={`h-full ${getStatusColor()} transition-all duration-300`}
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
             )}
+
+            {lastCrawl && status === 'completed' && (
+              <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
+                <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">
+                  Last crawl: {lastCrawl.toLocaleString()}
+                </p>
+                {emails.length > 0 && (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Found {emails.length} email{emails.length !== 1 ? 's' : ''}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {status === 'idle' || status === 'completed' || status === 'error' ? (
+                <>
+                  <button
+                    onClick={startCrawl}
+                    className="flex-1 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 dark:bg-purple-500 dark:hover:bg-purple-600"
+                  >
+                    Start Crawl
+                  </button>
+                  {status === 'completed' && emails.length > 0 && (
+                    <button
+                      onClick={showEmails}
+                      className="rounded-lg border border-purple-300 bg-white px-4 py-2.5 text-sm font-medium text-purple-600 transition-colors hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 dark:border-purple-700 dark:bg-zinc-800 dark:text-purple-400 dark:hover:bg-zinc-700"
+                    >
+                      View Emails
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={stopCrawl}
+                  className="flex-1 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:border-red-700 dark:bg-zinc-800 dark:text-red-400 dark:hover:bg-zinc-700"
+                >
+                  Stop Crawl
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <EmailModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        emails={emails}
+        isLoading={isLoadingEmails}
+      />
+    </>
   );
-}
+});
 

@@ -10,11 +10,14 @@ export interface Credential {
   masked: boolean;
 }
 
+const DEFAULT_CREDENTIALS: Credential[] = [
+  { id: '1', name: 'OpenAI API Key', value: '', masked: true },
+  { id: '2', name: 'Email API Key', value: '', masked: true },
+  { id: '3', name: 'Nylas API Key', value: '', masked: true },
+];
+
 class CredentialsStore {
-  credentials: Credential[] = [
-    { id: '1', name: 'OpenAI API Key', value: '', masked: true },
-    { id: '2', name: 'Email API Key', value: '', masked: true },
-  ];
+  credentials: Credential[] = [...DEFAULT_CREDENTIALS];
 
   saveStatus: 'idle' | 'saving' | 'saved' | 'error' = 'idle';
 
@@ -29,14 +32,18 @@ class CredentialsStore {
     try {
       const stored = localStorage.getItem('credentials');
       if (stored) {
-        const parsed = JSON.parse(stored);
-        this.credentials = parsed.map((cred: Credential) => ({
-          ...cred,
-          masked: true, // Always mask when loading
-        }));
+        const parsed: Credential[] = JSON.parse(stored);
+        // Merge stored credentials with defaults to ensure all credentials exist
+        this.credentials = DEFAULT_CREDENTIALS.map(defaultCred => {
+          const storedCred = parsed.find(c => c.id === defaultCred.id);
+          return storedCred
+            ? { ...storedCred, masked: true } // Always mask when loading
+            : defaultCred;
+        });
       }
     } catch (error) {
       console.error('Failed to load credentials from storage:', error);
+      // Keep default credentials on error
     }
   }
 
@@ -83,6 +90,14 @@ class CredentialsStore {
       console.error('Failed to save credentials:', error);
       this.saveStatus = 'error';
     }
+  }
+
+  getCredentialByName(name: string): Credential | undefined {
+    return this.credentials.find(c => c.name === name);
+  }
+
+  getNylasApiKey(): string {
+    return this.getCredentialByName('Nylas API Key')?.value || '';
   }
 
   hasAllCredentials(): boolean {
