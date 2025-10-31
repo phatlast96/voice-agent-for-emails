@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: CrawlRequest = await request.json();
-    const { apiKey, grantId, openaiApiKey, limit = 50 } = body;
+    const { apiKey, grantId, openaiApiKey, limit = 200 } = body;
 
     if (!apiKey || !grantId) {
       return NextResponse.json(
