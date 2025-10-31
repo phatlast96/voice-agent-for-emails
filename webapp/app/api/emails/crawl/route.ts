@@ -20,10 +20,13 @@ export async function POST(request: NextRequest) {
 
     // Fetch messages from Nylas API v3
     // Documentation: https://developer.nylas.com/docs/v3/email/messages/
+    // Note: The base URL might vary by region (api.us.nylas.com, api.eu.nylas.com, etc.)
     const url = new URL(`https://api.us.nylas.com/v3/grants/${grantId}/messages`);
     url.searchParams.append('limit', limit.toString());
-    url.searchParams.append('order_by', 'date');
-    url.searchParams.append('order', 'desc');
+    // Note: Nylas API v3 doesn't support order_by and order parameters
+    // We'll sort the results client-side after fetching
+    
+    console.log('Fetching from Nylas API:', url.toString());
     
     const response = await fetch(url.toString(), {
       method: 'GET',
@@ -40,7 +43,9 @@ export async function POST(request: NextRequest) {
       
       try {
         const errorData = JSON.parse(errorText);
-        if (errorData.message) {
+        if (errorData.error?.message) {
+          errorMessage = errorData.error.message;
+        } else if (errorData.message) {
           errorMessage = errorData.message;
         }
       } catch {
@@ -56,22 +61,37 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
 
     // Transform Nylas messages to our Email format
-    const emails = (data.data || []).map((message: any) => ({
-      id: message.id,
-      subject: message.subject || '(No subject)',
-      from: {
-        name: message.from?.[0]?.name || message.from?.[0]?.email || 'Unknown',
-        email: message.from?.[0]?.email || 'unknown@example.com',
-      },
-      to: (message.to || []).map((recipient: any) => ({
-        name: recipient.name || recipient.email || 'Unknown',
-        email: recipient.email || 'unknown@example.com',
-      })),
-      date: new Date(message.date * 1000), // Nylas uses Unix timestamp in seconds
-      snippet: message.snippet || '',
-      body: message.body || '',
-      hasAttachments: (message.files || []).length > 0,
-    }));
+    const emails = (data.data || []).map((message: any) => {
+      // Handle date - Nylas can return Unix timestamp (seconds) or ISO string
+      let date: Date;
+      if (typeof message.date === 'number') {
+        date = new Date(message.date * 1000); // Convert seconds to milliseconds
+      } else if (typeof message.date === 'string') {
+        date = new Date(message.date);
+      } else {
+        date = new Date(); // Fallback to current date
+      }
+
+      return {
+        id: message.id,
+        subject: message.subject || '(No subject)',
+        from: {
+          name: message.from?.[0]?.name || message.from?.[0]?.email || 'Unknown',
+          email: message.from?.[0]?.email || 'unknown@example.com',
+        },
+        to: (message.to || []).map((recipient: any) => ({
+          name: recipient.name || recipient.email || 'Unknown',
+          email: recipient.email || 'unknown@example.com',
+        })),
+        date: date,
+        snippet: message.snippet || '',
+        body: message.body || '',
+        hasAttachments: (message.files || []).length > 0,
+      };
+    });
+
+    // Sort emails by date (newest first) since Nylas API doesn't support ordering
+    emails.sort((a: any, b: any) => b.date.getTime() - a.date.getTime());
 
     return NextResponse.json({ emails });
   } catch (error) {

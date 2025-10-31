@@ -72,6 +72,11 @@ class EmailStore {
       }
 
       const data = await response.json();
+
+      if (!data.emails) {
+        throw new Error(data.error || 'Invalid response format from API');
+      }
+
       this.emails = data.emails.map((email: any) => ({
         ...email,
         date: new Date(email.date),

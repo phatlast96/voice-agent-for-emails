@@ -37,3 +37,8 @@ You'll need to run both services in separate terminal windows/tabs:
 
 Once both are running, you can access the Next.js application at `http://localhost:3000` (or the port specified in your Next.js configuration).
 
+
+# Getting the Grant ID
+1. Go to the Nylas Developer Dashboard
+2. Click on "Grants" under "Manage"
+3. Click on "Create Grant" with the email you want to use for the grant
