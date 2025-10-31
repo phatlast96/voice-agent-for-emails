@@ -14,6 +14,7 @@ const DEFAULT_CREDENTIALS: Credential[] = [
   { id: '1', name: 'OpenAI API Key', value: '', masked: true },
   { id: '2', name: 'Email API Key', value: '', masked: true },
   { id: '3', name: 'Nylas API Key', value: '', masked: true },
+  { id: '4', name: 'Nylas Grant ID', value: '', masked: false },
 ];
 
 class CredentialsStore {
@@ -100,10 +101,16 @@ class CredentialsStore {
     return this.getCredentialByName('Nylas API Key')?.value || '';
   }
 
+  getNylasGrantId(): string {
+    return this.getCredentialByName('Nylas Grant ID')?.value || '';
+  }
+
   hasAllCredentials(): boolean {
     return this.credentials.every(cred => cred.value.trim().length > 0);
   }
 }
+
+export type { CredentialsStore };
 
 const CredentialsStoreContext = createContext<CredentialsStore | null>(null);
 
