@@ -260,32 +260,84 @@ export async function POST(request: NextRequest) {
                 }
 
                 const attachmentBuffer = await attachmentResponse.arrayBuffer();
-                const filename = attachment.filename || 'unknown';
+                const originalFilename = attachment.filename || 'unknown';
+                
+                // Sanitize filename for storage (remove special chars, limit length, handle Unicode)
+                const sanitizeFilename = (name: string): string => {
+                  // Extract extension if present
+                  const lastDot = name.lastIndexOf('.');
+                  const baseName = lastDot > 0 ? name.substring(0, lastDot) : name;
+                  const extension = lastDot > 0 ? name.substring(lastDot) : '';
+                  
+                  // Remove or replace problematic characters
+                  // Replace Unicode characters > 255 with underscore, keep ASCII safe chars
+                  let sanitized = baseName
+                    .replace(/[^\x00-\x7F]/g, '_') // Replace non-ASCII with underscore
+                    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') // Remove invalid filesystem chars
+                    .replace(/\s+/g, '_') // Replace spaces with underscores
+                    .replace(/_+/g, '_') // Collapse multiple underscores
+                    .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+                    .substring(0, 200); // Limit length
+                  
+                  // Ensure we have something
+                  if (!sanitized) {
+                    sanitized = 'file';
+                  }
+                  
+                  return sanitized + extension;
+                };
+                
+                const filename = sanitizeFilename(originalFilename);
                 const storagePath = `${grantId}/${message.id}/${attachment.id}/${filename}`;
 
-                // Upload to Supabase storage
-                const { error: uploadError } = await supabase.storage
-                  .from('email-attachments')
-                  .upload(storagePath, attachmentBuffer, {
-                    contentType: attachment.content_type || 'application/octet-stream',
-                    upsert: true,
-                  });
-
-                if (uploadError) {
-                  console.error(`Error uploading attachment ${attachment.id}:`, uploadError);
-                  return null;
+                // Upload to Supabase storage with retry logic for transient errors
+                let uploadError: any = null;
+                const maxRetries = 3;
+                for (let retry = 0; retry < maxRetries; retry++) {
+                  const result = await supabase.storage
+                    .from('email-attachments')
+                    .upload(storagePath, attachmentBuffer, {
+                      contentType: attachment.content_type || 'application/octet-stream',
+                      upsert: true,
+                    });
+                  
+                  uploadError = result.error;
+                  
+                  // Retry on 500 errors (server errors) or 503 (service unavailable)
+                  if (uploadError && (uploadError.statusCode === '500' || uploadError.statusCode === '503') && retry < maxRetries - 1) {
+                    const delay = Math.pow(2, retry) * 1000; // Exponential backoff: 1s, 2s, 4s
+                    console.log(`Storage upload failed, retrying in ${delay}ms (attempt ${retry + 1}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                  }
+                  
+                  // Success or non-retryable error
+                  break;
                 }
 
-                // Save attachment metadata
+                if (uploadError) {
+                  // Log detailed error info but don't fail the entire process
+                  console.error(`Error uploading attachment ${attachment.id} after ${maxRetries} attempts:`, {
+                    error: uploadError,
+                    statusCode: uploadError.statusCode,
+                    message: uploadError.message,
+                    filename: originalFilename,
+                    storagePath: storagePath,
+                  });
+                  // Continue processing - attachment metadata will still be saved but without storage
+                  // The storage_path will be set, but the file won't be available for download
+                }
+
+                // Save attachment metadata (use original filename for display, sanitized for storage path)
                 const attachmentData = {
                   id: attachment.id,
                   email_id: message.id,
-                  filename: filename,
+                  filename: originalFilename, // Keep original for user display
                   content_type: attachment.content_type || 'application/octet-stream',
                   size: attachment.size || 0,
                   is_inline: attachment.is_inline || false,
                   content_id: attachment.content_id || null,
-                  storage_path: storagePath,
+                  storage_path: storagePath, // Uses sanitized filename in path
                 };
 
                 const { error: attachmentError } = await supabase
@@ -299,7 +351,7 @@ export async function POST(request: NextRequest) {
 
                 const savedAttachment = {
                   id: attachment.id,
-                  filename: filename,
+                  filename: originalFilename, // Keep original for display, but use sanitized for storage
                   content_type: attachment.content_type || 'application/octet-stream',
                   size: attachment.size || 0,
                   is_inline: attachment.is_inline || false,

@@ -136,12 +136,14 @@ export async function extractTextFromAttachment(
  * Chunk text into smaller pieces for embedding
  * Splits text into chunks of approximately maxTokens tokens
  * @param text - Text to chunk
- * @param maxTokens - Maximum tokens per chunk (default ~8000 tokens ≈ 6000 characters)
+ * @param maxTokens - Maximum tokens per chunk (default ~6000 tokens for safety, max is 8192)
  * @param overlap - Number of characters to overlap between chunks (default 200)
  */
-export function chunkText(text: string, maxTokens: number = 8000, overlap: number = 200): string[] {
-  // Rough approximation: 1 token ≈ 4 characters
-  const maxChars = Math.floor(maxTokens * 4);
+export function chunkText(text: string, maxTokens: number = 6000, overlap: number = 200): string[] {
+  // Rough approximation: 1 token ≈ 4 characters for English text
+  // Use very conservative estimate to account for varying token density (code, special chars can be 1 char = 1 token)
+  // For safety, use 2 chars per token to handle worst case scenarios
+  const maxChars = Math.floor(maxTokens * 2); // Very conservative: assume 2 chars per token on average
   
   if (text.length <= maxChars) {
     return [text];

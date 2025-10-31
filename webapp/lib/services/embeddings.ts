@@ -13,6 +13,65 @@ function createOpenAIClient(apiKey: string): OpenAI {
 }
 
 /**
+ * Retry function with exponential backoff for rate limit errors
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 5,
+  initialDelay: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check if it's a rate limit error (429)
+      if (error?.status === 429 || error?.code === 'rate_limit_exceeded') {
+        // Extract retry delay from error message if available
+        let delay = initialDelay * Math.pow(2, attempt);
+        
+        // Try to extract retry-after from error response headers
+        if (error?.headers?.['retry-after']) {
+          delay = parseInt(error.headers['retry-after']) * 1000;
+        } else {
+          // Try to extract delay from error message (check multiple possible locations)
+          const errorMessage = error?.error?.message || error?.message || '';
+          const delayMatch = errorMessage.match(/try again in (\d+)\s*(ms|seconds?)/i);
+          if (delayMatch) {
+            const delayValue = parseInt(delayMatch[1]);
+            const unit = delayMatch[2]?.toLowerCase();
+            delay = unit?.startsWith('ms') ? delayValue : delayValue * 1000;
+          }
+        }
+        
+        // Cap the delay at 60 seconds, minimum 100ms
+        delay = Math.max(100, Math.min(delay, 60000));
+        
+        if (attempt < maxRetries - 1) {
+          console.log(`Rate limit hit, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+      
+      // Check if it's a token limit error (400) - need to handle chunk size
+      if (error?.status === 400 && error?.error?.message?.includes('maximum context length')) {
+        console.error(`Token limit exceeded - chunk is too large`);
+        throw new Error(`Chunk size exceeds token limit. Please reduce chunk size.`);
+      }
+      
+      // For non-rate-limit errors or final attempt, throw immediately
+      throw error;
+    }
+  }
+  
+  throw lastError || new Error('Max retries exceeded');
+}
+
+/**
  * Generate embeddings for email content and save to database
  * @param emailId - Email ID
  * @param subject - Email subject
@@ -47,28 +106,59 @@ export async function generateEmailEmbeddings(
     return;
   }
 
-  // Chunk the text if needed
-  const chunks = chunkText(fullText, 8000, 200);
+  // Chunk the text if needed (use 5000 tokens max for extra safety, OpenAI limit is 8192)
+  // Further split any chunk that's still too large
+  let chunks = chunkText(fullText, 5000, 200);
+  
+  // Validate and further split chunks that might still be too large
+  // Some text can have very high token density (e.g., code, URLs)
+  const validatedChunks: string[] = [];
+  for (const chunk of chunks) {
+    // If chunk is very large (>16k chars), split it further (assuming worst case 1 char = 1 token)
+    if (chunk.length > 16000) {
+      const subChunks = chunkText(chunk, 4000, 100);
+      validatedChunks.push(...subChunks);
+    } else {
+      validatedChunks.push(chunk);
+    }
+  }
+  chunks = validatedChunks;
 
   try {
     const openai = createOpenAIClient(openaiApiKey);
     
-    // Generate embeddings for all chunks in parallel
-    const embeddingPromises = chunks.map(async (chunk, index) => {
-      const response = await openai.embeddings.create({
-        model: 'text-embedding-3-small', // or 'text-embedding-ada-002'
-        input: chunk,
+    // Generate embeddings for all chunks with rate limiting
+    // Process in smaller batches to avoid rate limits
+    const batchSize = 5; // Reduced batch size to avoid rate limits
+    const embeddings = [];
+    
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      const batch = chunks.slice(i, i + batchSize);
+      const batchPromises = batch.map(async (chunk, batchIndex) => {
+        const chunkIndex = i + batchIndex;
+        const response = await retryWithBackoff(() =>
+          openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: chunk,
+          })
+        );
+
+        return {
+          email_id: emailId,
+          chunk_text: chunk,
+          chunk_index: chunkIndex,
+          embedding: response.data[0].embedding,
+        };
       });
 
-      return {
-        email_id: emailId,
-        chunk_text: chunk,
-        chunk_index: index,
-        embedding: response.data[0].embedding,
-      };
-    });
-
-    const embeddings = await Promise.all(embeddingPromises);
+      const batchResults = await Promise.all(batchPromises);
+      embeddings.push(...batchResults);
+      
+      // Longer delay between batches to avoid rate limits
+      if (i + batchSize < chunks.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
 
     // Batch insert embeddings
     const { error } = await supabase.from('email_embeddings').insert(embeddings);
@@ -115,28 +205,59 @@ export async function generateAttachmentEmbeddings(
     return;
   }
 
-  // Chunk the text if needed
-  const chunks = chunkText(text, 8000, 200);
+  // Chunk the text if needed (use 5000 tokens max for extra safety, OpenAI limit is 8192)
+  // Further split any chunk that's still too large
+  let chunks = chunkText(text, 5000, 200);
+  
+  // Validate and further split chunks that might still be too large
+  // Some text can have very high token density (e.g., code, URLs)
+  const validatedChunks: string[] = [];
+  for (const chunk of chunks) {
+    // If chunk is very large (>16k chars), split it further (assuming worst case 1 char = 1 token)
+    if (chunk.length > 16000) {
+      const subChunks = chunkText(chunk, 4000, 100);
+      validatedChunks.push(...subChunks);
+    } else {
+      validatedChunks.push(chunk);
+    }
+  }
+  chunks = validatedChunks;
 
   try {
     const openai = createOpenAIClient(openaiApiKey);
     
-    // Generate embeddings for all chunks in parallel
-    const embeddingPromises = chunks.map(async (chunk, index) => {
-      const response = await openai.embeddings.create({
-        model: 'text-embedding-3-small', // or 'text-embedding-ada-002'
-        input: chunk,
+    // Generate embeddings for all chunks with rate limiting
+    // Process in smaller batches to avoid rate limits
+    const batchSize = 5; // Reduced batch size to avoid rate limits
+    const embeddings = [];
+    
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      const batch = chunks.slice(i, i + batchSize);
+      const batchPromises = batch.map(async (chunk, batchIndex) => {
+        const chunkIndex = i + batchIndex;
+        const response = await retryWithBackoff(() =>
+          openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: chunk,
+          })
+        );
+
+        return {
+          attachment_id: attachmentId,
+          chunk_text: chunk,
+          chunk_index: chunkIndex,
+          embedding: response.data[0].embedding,
+        };
       });
 
-      return {
-        attachment_id: attachmentId,
-        chunk_text: chunk,
-        chunk_index: index,
-        embedding: response.data[0].embedding,
-      };
-    });
-
-    const embeddings = await Promise.all(embeddingPromises);
+      const batchResults = await Promise.all(batchPromises);
+      embeddings.push(...batchResults);
+      
+      // Longer delay between batches to avoid rate limits
+      if (i + batchSize < chunks.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
 
     // Batch insert embeddings
     const { error } = await supabase.from('attachment_embeddings').insert(embeddings);
@@ -162,10 +283,12 @@ export async function generateAttachmentEmbeddings(
 export async function generateQueryEmbedding(query: string, openaiApiKey: string): Promise<number[]> {
   try {
     const openai = createOpenAIClient(openaiApiKey);
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: query,
-    });
+    const response = await retryWithBackoff(() =>
+      openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: query,
+      })
+    );
 
     return response.data[0].embedding;
   } catch (error) {
