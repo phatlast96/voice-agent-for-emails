@@ -4,6 +4,18 @@
 
 This project requires both Supabase and Next.js to be running simultaneously.
 
+### Starting the development server
+
+1. Navigate to the root folder:
+   ```bash
+   cd voice-agent-for-emails
+   ```
+2. Start the development server:
+   ```bash
+   ./start-dev.sh
+   ```
+
+
 ### Starting Supabase
 
 1. Navigate to the `supabase` folder:
