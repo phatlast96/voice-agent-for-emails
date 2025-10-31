@@ -292,6 +292,7 @@ export async function POST(request: NextRequest) {
           snippet: emailData.snippet,
           body: emailData.body || '',
           hasAttachments: savedAttachments.length > 0,
+          hasEmbeddings: false, // Will be true once embeddings are generated
           attachments: savedAttachments,
         });
 

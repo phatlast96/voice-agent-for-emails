@@ -56,6 +56,15 @@ export async function POST(
       .single();
 
     if (cachedEmail && !cacheError) {
+      // Check if embeddings exist
+      const { data: embeddingsData } = await supabase
+        .from('email_embeddings')
+        .select('id')
+        .eq('email_id', emailId)
+        .limit(1);
+
+      const hasEmbeddings = embeddingsData && embeddingsData.length > 0;
+
       // Transform cached email to our format
       const email = {
         id: cachedEmail.id,
@@ -74,6 +83,7 @@ export async function POST(
         snippet: cachedEmail.snippet,
         body: cachedEmail.body || '',
         hasAttachments: (cachedEmail.attachments || []).length > 0,
+        hasEmbeddings: hasEmbeddings,
         attachments: (cachedEmail.attachments || []).map((a: any) => ({
           id: a.id,
           filename: a.filename,
@@ -138,6 +148,7 @@ export async function POST(
       snippet: message.snippet || '',
       body: message.body || '',
       hasAttachments: attachments.length > 0,
+      hasEmbeddings: false, // Will be true once embeddings are generated
       attachments: attachments,
     };
 

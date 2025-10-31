@@ -59,6 +59,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check which emails have embeddings
+    const emailIds = (emails || []).map((e: any) => e.id);
+    const { data: embeddingsData } = await supabase
+      .from('email_embeddings')
+      .select('email_id')
+      .in('email_id', emailIds);
+
+    const emailsWithEmbeddings = new Set(
+      (embeddingsData || []).map((e: any) => e.email_id)
+    );
+
     // Transform to our Email format
     const transformedEmails = (emails || []).map((email: any) => ({
       id: email.id,
@@ -77,6 +88,7 @@ export async function POST(request: NextRequest) {
       snippet: email.snippet,
       body: email.body || '',
       hasAttachments: (email.attachments || []).length > 0,
+      hasEmbeddings: emailsWithEmbeddings.has(email.id),
       attachments: (email.attachments || []).map((a: any) => ({
         id: a.id,
         filename: a.filename,

@@ -21,6 +21,7 @@ export interface Email {
   snippet: string;
   body?: string;
   hasAttachments?: boolean;
+  hasEmbeddings?: boolean;
   attachments?: Attachment[];
 }
 
@@ -244,6 +245,19 @@ function EmailItem({ email }: { email: Email }) {
                 <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
+              )}
+              {email.hasEmbeddings === false && (
+                <div
+                  className="group relative flex items-center"
+                  title="This email is not searchable by the voice agent. Embeddings were not generated (check OpenAI API key configuration)."
+                >
+                  <div className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 dark:bg-amber-900/30">
+                    <svg className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Not searchable</span>
+                  </div>
+                </div>
               )}
               <span className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
                 {formatDate(email.date)}

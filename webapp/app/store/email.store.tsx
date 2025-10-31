@@ -22,6 +22,7 @@ export interface Email {
   snippet: string;
   body?: string;
   hasAttachments?: boolean;
+  hasEmbeddings?: boolean;
   attachments?: Attachment[];
 }
 
