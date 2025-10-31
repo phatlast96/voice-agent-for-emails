@@ -276,9 +276,9 @@ function EmailItem({ email }: { email: Email }) {
           {/* Attachments */}
           {email.attachments && email.attachments.length > 0 && (
             <div className="mt-3 space-y-1.5">
-              {email.attachments.map((attachment) => (
+              {email.attachments.map((attachment, index) => (
                 <button
-                  key={attachment.id}
+                  key={`${email.id}-${attachment.id}-${index}`}
                   onClick={() => handleDownloadAttachment(attachment)}
                   disabled={downloadingAttachmentId === attachment.id}
                   className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
