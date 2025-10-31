@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseClient } from '@/lib/supabase';
 
 interface EmailDetailsRequest {
   apiKey: string;
@@ -22,8 +23,74 @@ export async function POST(
       );
     }
 
-    // Fetch message details from Nylas API
-    // Attachments are included by default in the message response
+    const supabase = createSupabaseClient();
+
+    // First, try to fetch from Supabase cache
+    const { data: cachedEmail, error: cacheError } = await supabase
+      .from('emails')
+      .select(`
+        id,
+        subject,
+        from_name,
+        from_email,
+        snippet,
+        body,
+        date,
+        email_recipients (
+          type,
+          name,
+          email
+        ),
+        attachments (
+          id,
+          filename,
+          content_type,
+          size,
+          is_inline,
+          content_id,
+          storage_path
+        )
+      `)
+      .eq('id', emailId)
+      .eq('grant_id', grantId)
+      .single();
+
+    if (cachedEmail && !cacheError) {
+      // Transform cached email to our format
+      const email = {
+        id: cachedEmail.id,
+        subject: cachedEmail.subject,
+        from: {
+          name: cachedEmail.from_name,
+          email: cachedEmail.from_email,
+        },
+        to: (cachedEmail.email_recipients || [])
+          .filter((r: any) => r.type === 'to')
+          .map((r: any) => ({
+            name: r.name || 'Unknown',
+            email: r.email,
+          })),
+        date: new Date(cachedEmail.date),
+        snippet: cachedEmail.snippet,
+        body: cachedEmail.body || '',
+        hasAttachments: (cachedEmail.attachments || []).length > 0,
+        attachments: (cachedEmail.attachments || []).map((a: any) => ({
+          id: a.id,
+          filename: a.filename,
+          content_type: a.content_type,
+          size: a.size,
+          is_inline: a.is_inline || false,
+          content_id: a.content_id,
+          storage_path: a.storage_path,
+        })),
+      };
+
+      return NextResponse.json({ email, cached: true });
+    }
+
+    // Fallback to Nylas API if not found in cache
+    console.log(`Email ${emailId} not found in cache, fetching from Nylas API`);
+
     const nylasApiUrl = `https://api.us.nylas.com/v3/grants/${grantId}/messages/${emailId}`;
     
     const response = await fetch(nylasApiUrl, {
@@ -74,7 +141,10 @@ export async function POST(
       attachments: attachments,
     };
 
-    return NextResponse.json({ email });
+    // Optionally save to Supabase cache for future requests (async, don't wait)
+    // This would be similar to the crawl route logic
+
+    return NextResponse.json({ email, cached: false });
   } catch (error) {
     console.error('Error fetching email details:', error);
     return NextResponse.json(
@@ -83,4 +153,3 @@ export async function POST(
     );
   }
 }
-

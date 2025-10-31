@@ -143,6 +143,55 @@ class EmailStore {
   clearEmails() {
     this.emails = [];
   }
+
+  /**
+   * Fetch emails from Supabase database (cached emails)
+   * Useful for loading previously crawled emails without re-crawling
+   */
+  async fetchEmailsFromSupabase(): Promise<void> {
+    const grantId = this.credentialsStore.getNylasGrantId();
+
+    if (!grantId.trim()) {
+      this.status = 'error';
+      this.error = 'Please configure your Nylas Grant ID in settings first.';
+      return;
+    }
+
+    this.status = 'running';
+    this.error = null;
+
+    try {
+      const response = await fetch('/api/emails/fetch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ grantId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to fetch emails' }));
+        throw new Error(errorData.error || 'Failed to fetch emails');
+      }
+
+      const data = await response.json();
+
+      if (!data.emails) {
+        throw new Error(data.error || 'Invalid response format from API');
+      }
+
+      this.emails = data.emails.map((email: any) => ({
+        ...email,
+        date: new Date(email.date),
+      }));
+      this.status = 'completed';
+      this.progress = 100;
+    } catch (error) {
+      this.status = 'error';
+      this.error = error instanceof Error ? error.message : 'Unknown error occurred';
+      console.error('Failed to fetch emails from Supabase:', error);
+    }
+  }
 }
 
 const EmailStoreContext = createContext<EmailStore | null>(null);
