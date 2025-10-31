@@ -4,6 +4,14 @@
 
 This project requires both Supabase and Next.js to be running simultaneously.
 
+### Goals
+- Build a local voice agent that can answer questions about a user’s emails (including PDF attachments), and can send emails
+- Scope: local-only (no cloud deployment); OK to use cloud-hosted LLM/STT/TTS APIs
+- Data: OAuth into Gmail, crawl at least 200 emails with attachments, store locally
+- Product: working UI (web) to configure auth/keys, run crawl, and query via voice
+- Deliverable: GitHub repo runnable locally; due Friday morning
+- Optional tools mentioned: LiveKit/Pipecat/WebRTC for voice; any local DB for storage
+
 ### Starting the development server
 
 1. Navigate to the root folder:
