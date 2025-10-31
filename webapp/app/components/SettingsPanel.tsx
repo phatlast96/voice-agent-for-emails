@@ -1,36 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import { observer } from 'mobx-react-lite';
+import { useCredentialsStore } from '../store/credentials.store';
 
-interface ApiKey {
-  id: string;
-  name: string;
-  value: string;
-  masked: boolean;
-}
-
-export function SettingsPanel() {
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([
-    { id: '1', name: 'OpenAI API Key', value: '', masked: true },
-    { id: '2', name: 'Email API Key', value: '', masked: true },
-  ]);
+export const SettingsPanel = observer(function SettingsPanel() {
+  const credentialsStore = useCredentialsStore();
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const toggleKeyVisibility = (id: string) => {
-    setApiKeys(keys =>
-      keys.map(key => key.id === id ? { ...key, masked: !key.masked } : key)
-    );
-  };
-
-  const updateKey = (id: string, value: string) => {
-    setApiKeys(keys =>
-      keys.map(key => key.id === id ? { ...key, value } : key)
-    );
-  };
-
-  const saveKeys = () => {
-    // TODO: Implement save to backend/localStorage
-    console.log('Saving keys:', apiKeys);
+  const handleSave = async () => {
+    await credentialsStore.saveCredentials();
   };
 
   return (
@@ -63,25 +42,25 @@ export function SettingsPanel() {
       {isExpanded && (
         <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
           <div className="space-y-4">
-            {apiKeys.map((key) => (
-              <div key={key.id} className="space-y-2">
+            {credentialsStore.credentials.map((credential) => (
+              <div key={credential.id} className="space-y-2">
                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  {key.name}
+                  {credential.name}
                 </label>
                 <div className="flex gap-2">
                   <input
-                    type={key.masked ? 'password' : 'text'}
-                    value={key.value}
-                    onChange={(e) => updateKey(key.id, e.target.value)}
+                    type={credential.masked ? 'password' : 'text'}
+                    value={credential.value}
+                    onChange={(e) => credentialsStore.updateCredential(credential.id, e.target.value)}
                     placeholder="Enter your API key"
                     className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 dark:focus:border-blue-400"
                   />
                   <button
-                    onClick={() => toggleKeyVisibility(key.id)}
+                    onClick={() => credentialsStore.toggleCredentialVisibility(credential.id)}
                     className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                    aria-label={key.masked ? 'Show' : 'Hide'}
+                    aria-label={credential.masked ? 'Show' : 'Hide'}
                   >
-                    {key.masked ? (
+                    {credential.masked ? (
                       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
@@ -96,15 +75,26 @@ export function SettingsPanel() {
               </div>
             ))}
             <button
-              onClick={saveKeys}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:bg-blue-500 dark:hover:bg-blue-600"
+              onClick={handleSave}
+              disabled={credentialsStore.saveStatus === 'saving'}
+              className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-blue-500 dark:hover:bg-blue-600"
             >
-              Save Configuration
+              {credentialsStore.saveStatus === 'saving' && 'Saving...'}
+              {credentialsStore.saveStatus === 'saved' && '✓ Saved'}
+              {credentialsStore.saveStatus === 'error' && '✗ Error - Try Again'}
+              {credentialsStore.saveStatus === 'idle' && 'Save Configuration'}
             </button>
+
+            {credentialsStore.hasAllCredentials() && credentialsStore.saveStatus === 'saved' && (
+              <div className="rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
+                <p className="text-xs font-medium text-green-600 dark:text-green-400">
+                  ✓ All credentials configured
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
     </div>
   );
-}
-
+});
